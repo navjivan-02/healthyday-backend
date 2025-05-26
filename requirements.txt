@@ -1,0 +1,7 @@
+Flask
+flask-cors
+phonenumbers
+gspread
+google-auth
+google-cloud-firestore
+python-dotenv
