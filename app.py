@@ -1,11 +1,12 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, redirect
 from flask_cors import CORS
+from integrations.link_generator import create_shortio_link
 from utils.phone_utils import validate_mobile
 from utils.source_utils import parse_source_and_ref
 from integrations.google_sheets import save_to_sheets
-from integrations.firestore_db import check_existing_user, save_to_firestore, increment_referral, get_active_users
-from integrations.google_sheets import increment_referral_count_in_sheets
-from integrations.firestore_db import get_queued_users, mark_user_active, mark_user_completed
+from integrations.firestore_db import check_existing_user, save_to_firestore, get_active_users, write_to_14day_firestore
+from integrations.google_sheets import write_to_14day_sheet
+from integrations.firestore_db import mark_user_completed
 from integrations.whatsapp_api import send_whatsapp_message
 from datetime import datetime, timedelta, timezone
 from config import API_SECRET_KEY, AISENSY_API_KEY
@@ -21,13 +22,40 @@ def check_auth(request):
         return False
     return True
 
+def get_next_monday(start_date=None):
+    if not start_date:
+        start_date = datetime.now()
+    days_ahead = (7 - start_date.weekday()) % 7
+    if days_ahead == 0:
+        days_ahead = 7
+    return start_date + timedelta(days=days_ahead)
+
+def prepare_14day_data(mobile, name):
+    now = datetime.now()
+    reg_date = now.strftime('%m/%d/%Y')
+
+    # Dates
+    start_date = get_next_monday(now)
+    end_date = start_date + timedelta(days=13)
+
+    # Slug
+    last_six = mobile[-6:]
+    slug = f"{start_date.strftime('%d%m')}-{last_six}"
+
+    return {
+        "Mobile_Number": mobile,
+        "Name": name,
+        "Slug": slug,
+        "Reg_Date": reg_date,
+        "14D_Start_Date": start_date.strftime('%m/%d/%Y'),
+        "14D_End_Date": end_date.strftime('%m/%d/%Y'),
+        "14D_Link": ""  # Placeholder
+    }
+
+
 
 @app.route("/register", methods=["POST"])
 def register():
-
-    if not check_auth(request):
-        return jsonify({"error": "Unauthorized"}), 401
-    
     try:
         data = request.get_json()
         name = data.get("name")
@@ -38,9 +66,10 @@ def register():
 
         # Validate mobile number
         valid_mobile = validate_mobile(mobile)
+        cleaned_mobile = ''.join(filter(str.isdigit, mobile))
 
-        # Get referral and source from query string
-        referrer_code, source = parse_source_and_ref(request.args)
+        # Get referrer and source from query string
+        referrer_mobile, source = parse_source_and_ref(request.args)
 
         # Check if already registered
         status = check_existing_user(valid_mobile)
@@ -51,52 +80,52 @@ def register():
         elif status == "queued":
             return jsonify({"message": "You’ve already registered. Your batch starts next Monday."})
 
-        # Generate referral code for this user
-        import random, string
-        user_referral_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
 
-        # Save to Firestore and Google Sheets
-        save_to_firestore(name, valid_mobile, user_referral_code, referrer_code, source)
-        save_to_sheets(name, valid_mobile, user_referral_code, referrer_code, source)
 
-        # Increment referrer's count if valid
-        if referrer_code:
-            increment_referral(referrer_code)
-            increment_referral_count_in_sheets(referrer_code)  # Sheets
+        # Save to Firestore
+        save_to_firestore(name, valid_mobile,referrer_mobile, source)
+
+        # Save to Google Sheets
+        save_to_sheets(
+            name=name,
+            mobile=cleaned_mobile,
+            formatted_mobile=valid_mobile,
+            source=source,
+            referrer_mobile=referrer_mobile,
+            existing="No",
+            status="queued"
+        )
+
+        # Step: Prepare extra sheet data
+        extra_sheet_data = prepare_14day_data(mobile, name)
+
+        # Step: Write this to your second Google Sheet
+        write_to_14day_sheet(extra_sheet_data)
+
+        
+        # Save to Firestore
+        write_to_14day_firestore(extra_sheet_data)
+
+        #Link generation
+        '''create_shortio_link(
+        slug=extra_sheet_data["Slug"],
+        start_date=extra_sheet_data["14D_Start_Date"],
+        end_date=extra_sheet_data["14D_End_Date"]
+        )'''
+
+
 
         return jsonify({
             "message": f"Registration successful for {name}",
             "mobile": valid_mobile,
-            "referral_code": user_referral_code,
             "source": source,
-            "used_referral_code": referrer_code
+            "used_referrer_mobile": referrer_mobile
         })
-    
+
     except Exception as e:
+        import traceback
+        traceback.print_exc()  # Shows the full error in terminal
         return jsonify({"error": str(e)}), 500
-
-
-@app.route("/send_reminders", methods=["GET"])
-def send_reminders():
-    # Auth check
-    api_key = request.headers.get("X-API-Key")
-    if api_key != API_SECRET_KEY:
-        return jsonify({"error": "Unauthorized"}), 401
-
-    today = datetime.now().strftime("%A")  # E.g., 'Sunday'
-    if today != "Sunday":
-        return jsonify({"message": "Today is not Sunday. Reminders only go out one day before class."}), 200
-
-    queued_users = get_queued_users()
-    for user in queued_users:
-        message = f"Hi {user['name']}, your 14-day Healthyday yoga class starts tomorrow! Please be ready to join on time."
-        send_whatsapp_message(user["mobile"], message)
-        mark_user_active(user["mobile"])
-
-    return jsonify({
-        "message": f"Sent reminders to {len(queued_users)} users.",
-        "count": len(queued_users)
-    })
 
 
 @app.route("/mark_completed", methods=["GET"])
@@ -120,6 +149,8 @@ def mark_completed():
         "message": f"Marked {updated_count} users as completed.",
         "count": updated_count
     })
+
+
 
 
 if __name__ == "__main__":

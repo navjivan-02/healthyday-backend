@@ -6,5 +6,5 @@ __pycache__/
 venv/
 
 # Secrets
-.env
+.env*
 credentials/service_account.json

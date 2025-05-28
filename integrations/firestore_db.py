@@ -19,25 +19,18 @@ def check_existing_user(mobile):
         return data.get("status", "unknown")
     return None
 
-def save_to_firestore(name, mobile, referral_code, referrer_code, source):
+def save_to_firestore(name, mobile,referrer_code, source):
     """Save a new registration record to Firestore."""
     data = {
         "name": name,
         "mobile": mobile,
-        "referral_code": referral_code,
-        "referrer_code": referrer_code,
+        "referrer": referrer_code,
         "source": source,
         "status": "queued",  # default status
+        "reg_date": datetime.now().isoformat()
     }
     collection.document(mobile).set(data)
 
-def increment_referral(referrer_code):
-    """Increment referral count for a user by their referral code."""
-    query = collection.where("referral_code", "==", referrer_code).limit(1).stream()
-    for doc in query:
-        user_data = doc.to_dict()
-        count = user_data.get("referral_count", 0)
-        doc.reference.update({"referral_count": count + 1})
 
 
 def get_queued_users():
@@ -75,3 +68,7 @@ def mark_user_completed(mobile):
         "completed_at": datetime.now(timezone.utc).isoformat()
     })
     update_status_in_sheet(mobile, "completed")
+
+def write_to_14day_firestore(data):
+    doc_id = data["Mobile_Number"]  # use mobile as document ID
+    db.collection("14D_processed_dev").document(doc_id).set(data)
