@@ -1,7 +1,10 @@
 import gspread
 from google.oauth2.service_account import Credentials
-from config import GOOGLE_CREDENTIALS_PATH, SPREADSHEET_ID, SHEET_NAME
+from config import SHEET_14D_NEW, SHEET_14D_PROCESSED, FIRESTORE_COLLECTION_NEW
 from datetime import datetime
+from google.cloud import firestore
+import requests
+import os
 
 def save_to_sheets(
     name,
@@ -12,7 +15,8 @@ def save_to_sheets(
     existing="No",
     status="queued"
 ):
-    sheet = get_sheet("Sheet1")
+    sheet = get_sheet(SHEET_14D_NEW)
+
     
     # Format date
     reg_date = datetime.now().strftime("%Y-%m-%d")
@@ -37,18 +41,6 @@ def get_sheet(sheet_name):
     client = gspread.authorize(creds)
     return client.open_by_key(SPREADSHEET_ID).worksheet(sheet_name)
 
-
-def update_status_in_sheet(mobile, new_status):
-    sheet = get_sheet("Sheet1")
-    records = sheet.get_all_values()
-
-    for i, row in enumerate(records[1:], start=2):  # Start from row 2
-        if len(row) >= 2 and row[1].strip() == mobile:
-            sheet.update_cell(i, 6, new_status)  # Column F = 6
-            print(f"[Sheets] Status for {mobile} updated to {new_status}")
-            return
-    print(f"[Sheets] Mobile {mobile} not found in sheet.")
-
 def write_to_14day_sheet(data):
     sheet = get_sheet("14D_processed")
 
@@ -65,3 +57,61 @@ def write_to_14day_sheet(data):
 
     # Append the row to the sheet
     sheet.append_row(row)
+
+def update_status(mobile, new_status):
+    
+    sheet = get_sheet(SHEET_14D_NEW)
+    rows = sheet.get_all_records()
+
+    for idx, row in enumerate(rows, start=2):  # starts at row 2 (row 1 is header)
+        if str(row.get("Mobile_Number")) == str(mobile):
+            sheet.update_cell(idx, 8, new_status)  # Assuming "Status" is column H (8)
+            break
+
+    # Firestore update
+    db = firestore.client()
+    db.collection(FIRESTORE_COLLECTION_NEW).document(mobile).update({"status": new_status})
+
+def create_shortio_link(slug, start_date, end_date):
+    SHORTIO_API_KEY = os.getenv("SHORTIO_API_KEY")  # load from env if using dotenv
+    DOMAIN = "startyoga.short.gy"
+    FOLDER_ID = "NN1xHJ41dNKtrerkWZPFd"
+    ORIGINAL_URL = "https://www.instagram.com/healthydayyoga/"  # default instagram page
+
+
+    headers = {
+        "accept": "application/json",
+        "content-type": "application/json",
+        "authorization": SHORTIO_API_KEY
+    }
+
+    start_dt = datetime.strptime(start_date, "%m/%d/%Y")
+    end_dt = datetime.strptime(end_date, "%m/%d/%Y")
+
+    print("Start:", start_dt, "→", int(start_dt.timestamp()))
+    print("End:", end_dt, "→", int(end_dt.timestamp()))
+
+
+    body = {
+        "domain": DOMAIN,
+        "originalURL": ORIGINAL_URL,
+        "path": slug,
+        "expiresAt": int(end_dt.timestamp()*1000),
+        "startDate": int(start_dt.timestamp()*1000),
+        "folderId": FOLDER_ID
+    }
+
+
+    response = requests.post("https://api.short.io/links", json=body, headers=headers)
+
+    try:
+        data = response.json()
+        if response.status_code == 201 or data.get("success"):
+            print(f"✅ Link created: {data['shortURL']}")
+            return data
+        else:
+            print(f"❌ Short.io error: {response.text}")
+            return None
+    except Exception as e:
+        print("⚠️ JSON decode error:", e)
+        return None

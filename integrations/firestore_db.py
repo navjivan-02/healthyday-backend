@@ -1,15 +1,16 @@
 from google.cloud import firestore
-from config import GOOGLE_CREDENTIALS_PATH, FIRESTORE_COLLECTION
+from config import FIRESTORE_COLLECTION_NEW, FIRESTORE_COLLECTION_PROCESSED
 from datetime import datetime, timedelta, timezone
 from integrations.google_sheets import update_status_in_sheet
 import os
 import json
+from config import GOOGLE_CREDENTIALS_PATH
 
 # Set GOOGLE_APPLICATION_CREDENTIALS env for Firestore SDK
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = GOOGLE_CREDENTIALS_PATH
 
 db = firestore.Client()
-collection = db.collection(FIRESTORE_COLLECTION)
+collection = db.collection(FIRESTORE_COLLECTION_NEW)
 
 def check_existing_user(mobile):
     """Check if the user exists and return their status."""

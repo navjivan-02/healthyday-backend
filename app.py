@@ -1,11 +1,10 @@
 from flask import Flask, request, jsonify, redirect
 from flask_cors import CORS
-from integrations.link_generator import create_shortio_link
 from utils.phone_utils import validate_mobile
 from utils.source_utils import parse_source_and_ref
-from integrations.google_sheets import save_to_sheets
+from integrations.google_sheets import save_to_sheets,create_shortio_link
 from integrations.firestore_db import check_existing_user, save_to_firestore, get_active_users, write_to_14day_firestore
-from integrations.google_sheets import write_to_14day_sheet
+from integrations.google_sheets import write_to_14day_sheet, update_status, up
 from integrations.firestore_db import mark_user_completed
 from integrations.whatsapp_api import send_whatsapp_message
 from datetime import datetime, timedelta, timezone
@@ -41,6 +40,8 @@ def prepare_14day_data(mobile, name):
     # Slug
     last_six = mobile[-6:]
     slug = f"{start_date.strftime('%d%m')}-{last_six}"
+    short_link = f"https://startyoga.short.gy/{slug}"
+
 
     return {
         "Mobile_Number": mobile,
@@ -49,9 +50,8 @@ def prepare_14day_data(mobile, name):
         "Reg_Date": reg_date,
         "14D_Start_Date": start_date.strftime('%m/%d/%Y'),
         "14D_End_Date": end_date.strftime('%m/%d/%Y'),
-        "14D_Link": ""  # Placeholder
+        "14D_Link": short_link
     }
-
 
 
 @app.route("/register", methods=["POST"])
@@ -98,6 +98,10 @@ def register():
 
         # Step: Prepare extra sheet data
         extra_sheet_data = prepare_14day_data(mobile, name)
+        slug = extra_sheet_data["Slug"]
+        start_date=extra_sheet_data["14D_Start_Date"]
+        end_date=extra_sheet_data["14D_End_Date"]
+        short_link = extra_sheet_data["14D_Link"]
 
         # Step: Write this to your second Google Sheet
         write_to_14day_sheet(extra_sheet_data)
@@ -106,12 +110,15 @@ def register():
         # Save to Firestore
         write_to_14day_firestore(extra_sheet_data)
 
+        send_whatsapp_message(mobile,name,short_link) #Send welcome message after registration
+
+        update_status(mobile=mobile, new_status="registered") #If everything is alright then registered status
+
+
         #Link generation
-        '''create_shortio_link(
-        slug=extra_sheet_data["Slug"],
-        start_date=extra_sheet_data["14D_Start_Date"],
-        end_date=extra_sheet_data["14D_End_Date"]
-        )'''
+        response=create_shortio_link(slug, start_date, end_date)
+
+        print("Short.io API response:", response)  # 🔍 Debug line
 
 
 
