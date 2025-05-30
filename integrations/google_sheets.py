@@ -1,6 +1,6 @@
 import gspread
 from google.oauth2.service_account import Credentials
-from config import SHEET_14D_NEW, SHEET_14D_PROCESSED, FIRESTORE_COLLECTION_NEW
+from config import SHEET_14D_NEW, SHEET_14D_PROCESSED, FIRESTORE_COLLECTION_NEW, SPREADSHEET_ID, GOOGLE_CREDENTIALS_PATH, SHORTIO_API_KEY
 from datetime import datetime
 from google.cloud import firestore
 import requests
@@ -42,7 +42,7 @@ def get_sheet(sheet_name):
     return client.open_by_key(SPREADSHEET_ID).worksheet(sheet_name)
 
 def write_to_14day_sheet(data):
-    sheet = get_sheet("14D_processed")
+    sheet = get_sheet(SHEET_14D_PROCESSED)
 
     # Prepare the row in correct column order
     row = [
@@ -59,21 +59,32 @@ def write_to_14day_sheet(data):
     sheet.append_row(row)
 
 def update_status(mobile, new_status):
-    
     sheet = get_sheet(SHEET_14D_NEW)
     rows = sheet.get_all_records()
 
-    for idx, row in enumerate(rows, start=2):  # starts at row 2 (row 1 is header)
-        if str(row.get("Mobile_Number")) == str(mobile):
-            sheet.update_cell(idx, 8, new_status)  # Assuming "Status" is column H (8)
+    def normalize_mobile(number):
+        return ''.join(filter(str.isdigit, str(number)))
+
+    target = normalize_mobile(mobile)
+    updated = False
+
+    for idx, row in enumerate(rows, start=2):
+        sheet_number = normalize_mobile(row.get("MobileNumberFormatted", ""))
+        if sheet_number == target:
+            sheet.update_cell(idx, 8, new_status)
+            print(f"[Sheet] Updated row {idx} for mobile {mobile}")
+            updated = True
             break
 
+    if not updated:
+        print(f"[Sheet] Mobile {mobile} not found in sheet!")
+
     # Firestore update
-    db = firestore.client()
+    db = firestore.Client()
     db.collection(FIRESTORE_COLLECTION_NEW).document(mobile).update({"status": new_status})
+    print(f"[Firestore] Updated status for {mobile} → {new_status}")
 
 def create_shortio_link(slug, start_date, end_date):
-    SHORTIO_API_KEY = os.getenv("SHORTIO_API_KEY")  # load from env if using dotenv
     DOMAIN = "startyoga.short.gy"
     FOLDER_ID = "NN1xHJ41dNKtrerkWZPFd"
     ORIGINAL_URL = "https://www.instagram.com/healthydayyoga/"  # default instagram page

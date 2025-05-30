@@ -4,8 +4,7 @@ from utils.phone_utils import validate_mobile
 from utils.source_utils import parse_source_and_ref
 from integrations.google_sheets import save_to_sheets,create_shortio_link
 from integrations.firestore_db import check_existing_user, save_to_firestore, get_active_users, write_to_14day_firestore
-from integrations.google_sheets import write_to_14day_sheet, update_status, up
-from integrations.firestore_db import mark_user_completed
+from integrations.google_sheets import write_to_14day_sheet, update_status
 from integrations.whatsapp_api import send_whatsapp_message
 from datetime import datetime, timedelta, timezone
 from config import API_SECRET_KEY, AISENSY_API_KEY
@@ -112,7 +111,7 @@ def register():
 
         send_whatsapp_message(mobile,name,short_link) #Send welcome message after registration
 
-        update_status(mobile=mobile, new_status="registered") #If everything is alright then registered status
+        update_status(mobile=valid_mobile, new_status="registered") #If everything is alright then registered status
 
 
         #Link generation
@@ -133,30 +132,6 @@ def register():
         import traceback
         traceback.print_exc()  # Shows the full error in terminal
         return jsonify({"error": str(e)}), 500
-
-
-@app.route("/mark_completed", methods=["GET"])
-def mark_completed():
-    # Auth check
-    api_key = request.headers.get("X-API-Key")
-    if api_key != API_SECRET_KEY:
-        return jsonify({"error": "Unauthorized"}), 401
-
-    active_users = get_active_users()
-    cutoff_date = datetime.now(timezone.utc) - timedelta(days=14)
-    updated_count = 0
-
-    for user in active_users:
-        activated_date = datetime.fromisoformat(user["activated_at"]).replace(tzinfo=timezone.utc)
-        if activated_date < cutoff_date:
-            mark_user_completed(user["id"])
-            updated_count += 1
-
-    return jsonify({
-        "message": f"Marked {updated_count} users as completed.",
-        "count": updated_count
-    })
-
 
 
 

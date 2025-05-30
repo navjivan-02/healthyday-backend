@@ -2,9 +2,7 @@ from datetime import datetime
 import gspread
 from google.cloud import firestore
 from google.oauth2.service_account import Credentials
-import gspread
-from config import SHEET_14D_PROCESSED, FIRESTORE_COLLECTION_NEW, GOOGLE_CREDENTIALS_PATH
-
+from config import SHEET_14D_PROCESSED, FIRESTORE_COLLECTION_NEW, GOOGLE_CREDENTIALS_PATH, SPREADSHEET_ID
 
 def get_gspread_client():
     scope = [
@@ -14,35 +12,47 @@ def get_gspread_client():
     creds = Credentials.from_service_account_file(GOOGLE_CREDENTIALS_PATH, scope)
     return gspread.authorize(creds)
 
-
 def update_user_statuses():
     today = datetime.today().date()
 
-    # === Sheets setup ===
-    client = get_gspread_client()
-    sheet1 = client.open(SHEET_NAME).worksheet(SHEET_14D_PROCESSED)
-    rows = sheet1.get_all_records()
+    # === Setup ===
+    db = firestore.Client()
+    gclient = get_gspread_client()
+    sheet = gclient.open_by_key(SPREADSHEET_ID).worksheet(SHEET_14D_PROCESSED)
+    sheet_data = sheet.get_all_records()
+    
+    # Build lookup for row indexing in Sheets
+    row_index_map = {str(row["Mobile_Number"]): idx+2 for idx, row in enumerate(sheet_data)}
 
-    # === Firestore setup ===
-    db = firestore.client()
+    # === Process Firestore documents ===
+    users_ref = db.collection(FIRESTORE_COLLECTION_NEW)
+    users = users_ref.stream()
 
-    for idx, row in enumerate(rows, start=2):
-        mobile = str(row.get("Mobile_Number"))
-        start = datetime.strptime(row["14D_Start_Date"], "%m/%d/%Y").date()
-        end = datetime.strptime(row["14D_End_Date"], "%m/%d/%Y").date()
+    for doc in users:
+        data = doc.to_dict()
+        mobile = str(data.get("Mobile_Number"))
+        start_str = data.get("14D_Start_Date")
+        end_str = data.get("14D_End_Date")
 
-        if start <= today <= end:
-            new_status = "ongoing"
-        elif today > end:
-            new_status = "completed"
+        if not (start_str and end_str):
+            continue
+
+        start_date = datetime.strptime(start_str, "%m/%d/%Y").date()
+        end_date = datetime.strptime(end_str, "%m/%d/%Y").date()
+
+        if start_date <= today <= end_date:
+            status = "ongoing"
+        elif today > end_date:
+            status = "completed"
         else:
-            continue  # future user or already updated
+            continue  # not yet started
 
-        # Google Sheets update
-        sheet1.update_cell(idx, 8, new_status)  # Status column is column 8
+        # Update Firestore
+        users_ref.document(mobile).update({"Status": status})
 
-        # Firestore update
-        db.collection(FIRESTORE_COLLECTION_NEW).document(mobile).update({"Status": new_status})
+        # Update Google Sheet (only if row exists)
+        if mobile in row_index_map:
+            sheet.update_cell(row_index_map[mobile], 8, status)  # Column 8 is 'Status'
 
 if __name__ == "__main__":
     update_user_statuses()

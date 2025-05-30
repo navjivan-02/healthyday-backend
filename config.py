@@ -22,7 +22,7 @@ SHEET_14D_NEW = "14D_new"
 SHEET_14D_PROCESSED = "14D_processed"
 
 # === FIRESTORE COLLECTIONS ===
-FIRESTORE_COLLECTION_NEW = "registration_dev"
+FIRESTORE_COLLECTION_NEW = "registrations_dev"
 FIRESTORE_COLLECTION_PROCESSED = "14D_processed_dev"
 
 # === DEBUG PRINTS ===
