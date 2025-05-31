@@ -31,4 +31,4 @@ print(f"[CONFIG] API_SECRET_KEY = {API_SECRET_KEY}")
 print(f"[CONFIG] SHEET_ID = {SPREADSHEET_ID}")
 
 # === WHATSAPP API ===
-CAMPAIGN_NAME = "joining_link_v3"
+CAMPAIGN_NAME = "New_Reg_Test"
